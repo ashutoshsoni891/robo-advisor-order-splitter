@@ -1,6 +1,6 @@
 import { RequestHandler, Router } from 'express';
 import { OrderService } from '../services/orderService';
-import { listOrdersQuerySchema, splitOrderSchema } from './schemas';
+import { listOrdersQuerySchema, orderIdSchema, splitOrderSchema } from './schemas';
 
 /** Express 4 does not catch async errors, but our handlers are sync so a plain try/catch wrapper is enough. */
 const handle =
@@ -38,7 +38,8 @@ export function createOrderRouter(orders: OrderService): Router {
   router.get(
     '/:id',
     handle((req, res) => {
-      res.json(orders.getOrder(String(req.params.id)));
+      const id = orderIdSchema.parse(req.params.id);
+      res.json(orders.getOrder(id));
     }),
   );
 

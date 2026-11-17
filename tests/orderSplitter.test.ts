@@ -5,7 +5,7 @@ const holding = (symbol: string, weight: number, price: number): PricedHolding =
   symbol,
   weight,
   price,
-  priceSource: 'FIXED',
+  priceSource: 'DEFAULT',
 });
 
 describe('splitOrder', () => {

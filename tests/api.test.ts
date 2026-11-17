@@ -31,13 +31,34 @@ describe('POST /api/v1/orders/split', () => {
       executionTime: '2024-01-08T15:00:00.000Z',
     });
     expect(res.body.lines).toEqual([
-      expect.objectContaining({ symbol: 'AAPL', amount: 60, price: 190, priceSource: 'FIXED', quantity: 0.315 }),
-      expect.objectContaining({ symbol: 'TSLA', amount: 40, price: 250, priceSource: 'FIXED', quantity: 0.16 }),
+      expect.objectContaining({ symbol: 'AAPL', amount: 60, price: 100, priceSource: 'DEFAULT', quantity: 0.6 }),
+      expect.objectContaining({ symbol: 'TSLA', amount: 40, price: 100, priceSource: 'DEFAULT', quantity: 0.4 }),
     ]);
   });
 
+  it('prices any symbol at the $100 default, not just well-known tickers', async () => {
+    const body = { ...splitBody, portfolio: [{ symbol: 'NVDA', weight: 100 }] };
+    const res = await request(buildApp()).post('/api/v1/orders/split').send(body);
+
+    expect(res.status).toBe(201);
+    expect(res.body.lines[0]).toMatchObject({ symbol: 'NVDA', price: 100, priceSource: 'DEFAULT', quantity: 1 });
+  });
+
+  it('mixes request prices and default prices in one order', async () => {
+    const body = {
+      ...splitBody,
+      portfolio: [
+        { symbol: 'AAPL', weight: 50, price: 200 },
+        { symbol: 'TSLA', weight: 50 },
+      ],
+    };
+    const res = await request(buildApp()).post('/api/v1/orders/split').send(body);
+
+    expect(res.body.lines.map((l: { priceSource: string }) => l.priceSource)).toEqual(['REQUEST', 'DEFAULT']);
+  });
+
   it('prefers a price sent in the request over the fixed one', async () => {
-    const body = { ...splitBody, portfolio: [{ symbol: 'aapl', weight: 100, price: 200 }] };
+    const body = { ...splitBody, portfolio: [{ symbol: 'aapl', weight: 100, price: 200 }] }; // default is 100
     const res = await request(buildApp()).post('/api/v1/orders/split').send(body);
 
     expect(res.status).toBe(201);
@@ -59,9 +80,10 @@ describe('POST /api/v1/orders/split', () => {
 
   it('uses the configured share precision', async () => {
     const config = loadConfig({ SHARE_DECIMALS: '1' });
-    const res = await request(buildApp(MARKET_OPEN_NOW, config)).post('/api/v1/orders/split').send(splitBody);
+    const body = { ...splitBody, portfolio: [{ symbol: 'AAPL', weight: 100, price: 190 }] };
+    const res = await request(buildApp(MARKET_OPEN_NOW, config)).post('/api/v1/orders/split').send(body);
 
-    expect(res.body.lines[0].quantity).toBe(0.3);
+    expect(res.body.lines[0].quantity).toBe(0.5); // 100 / 190 = 0.526 -> 0.5
   });
 
   describe('errors', () => {
@@ -80,6 +102,13 @@ describe('POST /api/v1/orders/split', () => {
       ['bad symbol', { ...splitBody, portfolio: [{ symbol: '$$', weight: 100 }] }],
       ['negative price', { ...splitBody, portfolio: [{ symbol: 'AAPL', weight: 100, price: -1 }] }],
       ['unexpected field', { ...splitBody, extra: true }],
+      ['huge amount (1e300)', { ...splitBody, totalAmount: 1e300 }],
+      ['amount above the limit', { ...splitBody, totalAmount: 1_000_000_001 }],
+      ['tiny amount (1e-300)', { ...splitBody, totalAmount: 1e-300 }],
+      ['huge price (1e300)', { ...splitBody, portfolio: [{ symbol: 'AAPL', weight: 100, price: 1e300 }] }],
+      ['tiny price (1e-300)', { ...splitBody, portfolio: [{ symbol: 'AAPL', weight: 100, price: 1e-300 }] }],
+      ['tiny weight (1e-300)', { ...splitBody, portfolio: [{ symbol: 'AAPL', weight: 1e-300 }] }],
+      ['too many stocks', { ...splitBody, portfolio: Array.from({ length: 101 }, (_, i) => ({ symbol: `S${i}`, weight: 1 })) }],
     ])('400 for %s', async (_name, body) => {
       const res = await post(body);
 
@@ -111,11 +140,36 @@ describe('POST /api/v1/orders/split', () => {
       expect(res.status).toBe(422);
     });
 
-    it('422 when a stock has no price anywhere', async () => {
-      const res = await post({ ...splitBody, portfolio: [{ symbol: 'NVDA', weight: 100 }] });
+    it('accepts values exactly at the limits', async () => {
+      const res = await post({
+        ...splitBody,
+        totalAmount: 1_000_000_000,
+        portfolio: [{ symbol: 'AAPL', weight: 100, price: 0.01 }],
+      });
 
-      expect(res.status).toBe(422);
-      expect(res.body.error.message).toMatch(/NVDA/);
+      expect(res.status).toBe(201);
+    });
+
+    it('415 when the body is not JSON', async () => {
+      const res = await request(buildApp())
+        .post('/api/v1/orders/split')
+        .set('Content-Type', 'text/plain')
+        .send(JSON.stringify(splitBody));
+
+      expect(res.status).toBe(415);
+      expect(res.body.error.code).toBe('UNSUPPORTED_MEDIA_TYPE');
+    });
+
+    it('415 for form-encoded bodies', async () => {
+      const res = await request(buildApp()).post('/api/v1/orders/split').type('form').send({ orderType: 'BUY' });
+
+      expect(res.status).toBe(415);
+    });
+
+    it('400 (not 415) when there is no body at all', async () => {
+      const res = await request(buildApp()).post('/api/v1/orders/split');
+
+      expect(res.status).toBe(400);
     });
 
     it('does not store failed orders', async () => {
@@ -181,11 +235,18 @@ describe('GET /api/v1/orders/:id', () => {
     expect(res.body).toEqual(created.body);
   });
 
-  it('404 for an unknown id', async () => {
-    const res = await request(buildApp()).get('/api/v1/orders/does-not-exist');
+  it('404 for a well-formed id that does not exist', async () => {
+    const res = await request(buildApp()).get('/api/v1/orders/b1ea2e69-f7fc-4750-9648-6b051419d061');
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it.each(['does-not-exist', '123', 'b1ea2e69-f7fc-4750-9648-6b051419d06'])('400 for the malformed id %p', async (id) => {
+    const res = await request(buildApp()).get(`/api/v1/orders/${id}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 });
 

@@ -1,7 +1,7 @@
 import express, { Express } from 'express';
 import { AppConfig } from './config';
-import { FIXED_PRICES } from './config/prices';
-import { errorHandler, notFoundHandler, responseTimer } from './http/middleware';
+import { DEFAULT_PRICE } from './config/prices';
+import { errorHandler, notFoundHandler, requireJsonBody, responseTimer } from './http/middleware';
 import { createOrderRouter } from './http/orderRoutes';
 import { InMemoryOrderRepository } from './repositories/orderRepository';
 import { Clock, OrderService } from './services/orderService';
@@ -17,7 +17,7 @@ export interface AppOptions {
 
 export function createApp({ config, clock, logRequests = true }: AppOptions): Express {
   const orderService = new OrderService(
-    new PriceService(FIXED_PRICES),
+    new PriceService(DEFAULT_PRICE),
     new InMemoryOrderRepository(),
     config,
     clock,
@@ -27,6 +27,7 @@ export function createApp({ config, clock, logRequests = true }: AppOptions): Ex
   app.disable('x-powered-by');
 
   if (logRequests) app.use(responseTimer());
+  app.use(requireJsonBody);
   app.use(express.json({ limit: '100kb' }));
 
   app.get('/health', (_req, res) => {

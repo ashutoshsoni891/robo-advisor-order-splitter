@@ -57,11 +57,11 @@ Request body:
 | Field | Type | Notes |
 |---|---|---|
 | `orderType` | `"BUY"` or `"SELL"` | required |
-| `totalAmount` | number | required, greater than 0, max 2 decimal places (USD) |
+| `totalAmount` | number | required, 0.01 to 1,000,000,000, max 2 decimal places (USD) |
 | `portfolio` | array | required, 1 to 100 stocks |
 | `portfolio[].symbol` | string | ticker, case-insensitive |
-| `portfolio[].weight` | number | percentage, greater than 0. All weights must add up to exactly 100 |
-| `portfolio[].price` | number, optional | current market price. **If sent, it overrides the fixed price** |
+| `portfolio[].weight` | number | percentage, 0.01 to 100. All weights must add up to exactly 100 |
+| `portfolio[].price` | number, optional | current market price. 0.01 to 10,000,000. **If sent, it overrides the default price ($100)** |
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/orders/split \
@@ -84,12 +84,12 @@ Response `201 Created`:
   "orderType": "BUY",
   "totalAmount": 100,
   "lines": [
-    { "symbol": "AAPL", "weight": 60, "amount": 60, "price": 190, "priceSource": "FIXED",
-      "quantity": 0.315, "unallocatedAmount": 0.15 },
+    { "symbol": "AAPL", "weight": 60, "amount": 60, "price": 100, "priceSource": "DEFAULT",
+      "quantity": 0.6, "unallocatedAmount": 0 },
     { "symbol": "TSLA", "weight": 40, "amount": 40, "price": 245.1, "priceSource": "REQUEST",
       "quantity": 0.163, "unallocatedAmount": 0.05 }
   ],
-  "unallocatedAmount": 0.2,
+  "unallocatedAmount": 0.05,
   "executionTime": "2024-01-15T14:30:00.000Z",
   "createdAt": "2024-01-13T15:00:00.000Z"
 }
@@ -121,15 +121,16 @@ Every error has the same shape:
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | Bad shape or types, malformed JSON, unknown fields |
+| 400 | `VALIDATION_ERROR` | Bad shape or types, values outside the limits, malformed JSON, unknown fields, order id that is not a UUID |
 | 404 | `NOT_FOUND` | Unknown order or route |
 | 413 | `PAYLOAD_TOO_LARGE` | Body over 100 KB |
-| 422 | `BUSINESS_RULE_VIOLATION` | Weights not adding up to 100, duplicate symbols, no price for a symbol |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | Request body is not `application/json` |
+| 422 | `BUSINESS_RULE_VIOLATION` | Weights not adding up to 100, duplicate symbols |
 | 500 | `INTERNAL_ERROR` | Anything unexpected (details are logged, not returned) |
 
-### Fixed prices
+### Default price
 
-When no `price` is sent, these are used: AAPL 190, TSLA 250, GOOGL 170, MSFT 420, AMZN 185 (see [src/config/prices.ts](src/config/prices.ts)). Any other symbol needs a `price` in the request.
+Any stock without a `price` in the request is priced at **$100** (`priceSource: "DEFAULT"`). A price in the request always wins (`priceSource: "REQUEST"`). The default lives in [src/config/prices.ts](src/config/prices.ts).
 
 ## Project layout
 
@@ -137,7 +138,7 @@ When no `price` is sent, these are used: AAPL 190, TSLA 250, GOOGL 170, MSFT 420
 src/
   server.ts                 start-up
   app.ts                    builds the Express app (also used by tests)
-  config/                   env settings and fixed prices
+  config/                   env settings and default price
   domain/                   pure logic: orderSplitter, marketCalendar, types
   services/                 priceService, orderService (glue)
   repositories/             order storage (in-memory behind an interface)

@@ -16,6 +16,22 @@ export const responseTimer =
     next();
   };
 
+/**
+ * Rejects requests that carry a body that is not JSON with 415.
+ * Without this, express.json() skips the body and the caller would get a
+ * confusing "validation failed" error instead.
+ */
+export const requireJsonBody: RequestHandler = (req, _res, next) => {
+  // An empty body has no type to check; the validation step reports what is missing.
+  if (req.headers['content-length'] === '0') return next();
+
+  // req.is() returns null when there is no body, false when the type doesn't match
+  if (req.is('json') === false) {
+    return next(new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Content-Type must be application/json'));
+  }
+  next();
+};
+
 export const notFoundHandler: RequestHandler = (req, _res, next) => {
   next(new AppError(404, 'NOT_FOUND', `route ${req.method} ${req.path} not found`));
 };

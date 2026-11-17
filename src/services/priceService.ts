@@ -1,4 +1,3 @@
-import { businessRuleError } from '../errors';
 import { PriceSource } from '../domain/types';
 
 export interface ResolvedPrice {
@@ -6,19 +5,14 @@ export interface ResolvedPrice {
   source: PriceSource;
 }
 
-/** Decides which price to use for a stock: caller's market price first, then the fixed table. */
+/** Decides which price to use for a stock: the caller's market price first, otherwise the default. */
 export class PriceService {
-  constructor(private readonly fixedPrices: Readonly<Record<string, number>>) {}
+  constructor(private readonly defaultPrice: number) {}
 
-  resolve(symbol: string, requestPrice?: number): ResolvedPrice {
+  resolve(requestPrice?: number): ResolvedPrice {
     if (requestPrice !== undefined) {
       return { price: requestPrice, source: 'REQUEST' };
     }
-
-    const fixed = Object.hasOwn(this.fixedPrices, symbol) ? this.fixedPrices[symbol] : undefined;
-    if (fixed === undefined) {
-      throw businessRuleError(`no price available for ${symbol}; send a "price" for it in the request`);
-    }
-    return { price: fixed, source: 'FIXED' };
+    return { price: this.defaultPrice, source: 'DEFAULT' };
   }
 }

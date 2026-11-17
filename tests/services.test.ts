@@ -1,30 +1,17 @@
 import { loadConfig } from '../src/config';
 import { Order } from '../src/domain/types';
-import { AppError } from '../src/errors';
 import { InMemoryOrderRepository } from '../src/repositories/orderRepository';
 import { PriceService } from '../src/services/priceService';
 
 describe('PriceService', () => {
-  const prices = new PriceService({ AAPL: 190 });
+  const prices = new PriceService(100);
 
-  it('uses the fixed price when none is sent', () => {
-    expect(prices.resolve('AAPL')).toEqual({ price: 190, source: 'FIXED' });
+  it('uses the default price when none is sent', () => {
+    expect(prices.resolve()).toEqual({ price: 100, source: 'DEFAULT' });
   });
 
-  it('gives the request price priority over the fixed price', () => {
-    expect(prices.resolve('AAPL', 200.5)).toEqual({ price: 200.5, source: 'REQUEST' });
-  });
-
-  it('accepts a request price for a stock we have no fixed price for', () => {
-    expect(prices.resolve('NVDA', 900)).toEqual({ price: 900, source: 'REQUEST' });
-  });
-
-  it('fails for an unknown stock with no request price', () => {
-    expect(() => prices.resolve('NVDA')).toThrow(AppError);
-  });
-
-  it('does not treat object prototype keys as symbols', () => {
-    expect(() => prices.resolve('constructor')).toThrow(/no price available/);
+  it('gives the request price priority over the default price', () => {
+    expect(prices.resolve(200.5)).toEqual({ price: 200.5, source: 'REQUEST' });
   });
 });
 
@@ -33,7 +20,7 @@ describe('InMemoryOrderRepository', () => {
     id,
     orderType,
     totalAmount: 100,
-    lines: [{ symbol, weight: 100, amount: 100, price: 1, priceSource: 'FIXED', quantity: 100, unallocatedAmount: 0 }],
+    lines: [{ symbol, weight: 100, amount: 100, price: 1, priceSource: 'DEFAULT', quantity: 100, unallocatedAmount: 0 }],
     unallocatedAmount: 0,
     executionTime: '2024-01-08T15:00:00.000Z',
     createdAt: '2024-01-08T15:00:00.000Z',

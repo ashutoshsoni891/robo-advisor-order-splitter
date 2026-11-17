@@ -20,7 +20,7 @@ export class OrderService {
 
   createOrder(input: SplitOrderInput): Order {
     const holdings: PricedHolding[] = input.portfolio.map((h) => {
-      const { price, source } = this.prices.resolve(h.symbol, h.price);
+      const { price, source } = this.prices.resolve(h.price);
       return { symbol: h.symbol, weight: h.weight, price, priceSource: source };
     });
 

@@ -1,6 +1,6 @@
 export type OrderType = 'BUY' | 'SELL';
 
-export type PriceSource = 'REQUEST' | 'FIXED';
+export type PriceSource = 'REQUEST' | 'DEFAULT';
 
 /** One stock in the model portfolio. `weight` is a percentage (60 = 60%). */
 export interface PortfolioHolding {

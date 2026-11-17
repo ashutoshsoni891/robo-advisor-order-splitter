@@ -7,7 +7,7 @@ I started with the core question: given weights and an amount, what are the orde
 Then I built outwards in layers:
 
 1. **Domain**: splitting money, rounding shares, and the market calendar for "when to execute". Both are pure functions. The calendar takes `now` as an argument, so tests never depend on the real clock.
-2. **Services**: price lookup (request price, then fixed price, else error), and an `OrderService` that wires pricing, splitting, scheduling and saving together.
+2. **Services**: price lookup (request price, otherwise the $100 default), and an `OrderService` that wires pricing, splitting, scheduling and saving together.
 3. **Storage**: a repository interface with an in-memory `Map`. Data not surviving a restart falls out naturally, and a database can replace it later without touching the rest.
 4. **HTTP**: Express routes, zod validation, one error handler that always returns the same JSON shape, and a middleware that prints response time in ms.
 
@@ -22,7 +22,8 @@ Dollar amounts are allocated in whole cents with the largest remainder method, s
 
 - **Weights are percentages** (60 means 60%) and must add up to exactly 100. I reject anything else rather than silently normalising, because that would hide client mistakes.
 - **Currency is USD**, and `totalAmount` has at most 2 decimal places.
-- **Price priority:** a price in the request overrides the fixed price table, as the brief says. A symbol with neither gets a 422.
+- **Price priority:** a price in the request wins. Any stock without one is priced at a flat $100 default, so every symbol works. A real system would use a market data feed.
+- **Sanity limits:** `totalAmount` is 0.01 to 1 billion, `price` is 0.01 to 10 million, and `weight` is 0.01 to 100. These are my own choices, to reject absurd values such as `1e300` or `1e-300`. They are easy to change in `src/http/schemas.ts`.
 - **Market hours** are 9:30 to 16:00 America/New_York, Monday to Friday. Orders outside those hours are scheduled for the next open. **Holidays are not modelled.**
 - **"Execute now" when the market is open.** The API only tells the caller when to execute. It does not place trades or wait.
 - **Every split is stored** as an order, so `GET /orders` returns what was split. There is no separate "confirm" step.
@@ -34,7 +35,7 @@ Dollar amounts are allocated in whole cents with the largest remainder method, s
 
 - **Rounding.** Splitting money fairly is surprisingly fiddly. Naive rounding of each line can make the total off by a cent, and rounding shares to nearest could overspend. I settled on largest remainder for cents and round-down for shares, and wrote tests for the awkward cases (three-way splits, 7 decimal places, allocations smaller than one share).
 - **Time zones and daylight saving.** "Next open" must be computed in New York time, not the server's. I used luxon and added a test that crosses the March daylight saving change, where the open moves from 14:30Z to 13:30Z.
-- **Deciding where validation lives.** Shape and type checks (zod) return 400. Business rules (weights, duplicates, missing price) live in the domain and return 422, so they hold no matter how the code is called.
+- **Deciding where validation lives.** Shape and type checks (zod) return 400. Business rules (weights adding up to 100, duplicate symbols) live in the domain and return 422, so they hold no matter how the code is called.
 - **Keeping it simple.** It would have been easy to over-build (DB, auth, queues). I kept the scope to what the brief asks and listed the rest below.
 
 ## If you were to migrate this to production, what changes and controls would you put in place?
@@ -48,7 +49,7 @@ Dollar amounts are allocated in whole cents with the largest remainder method, s
 **Correctness and data**
 - Replace the in-memory repository with a database (e.g. PostgreSQL) behind the existing interface. Store money as decimals or integer cents.
 - **Idempotency keys** on `POST` so a retried request doesn't create a duplicate order.
-- Real market data provider for prices, with staleness checks, instead of a fixed table. Reject orders priced off stale data.
+- Real market data provider for prices, with staleness checks, instead of a flat default price. Reject orders priced off stale data.
 - An exchange calendar service for holidays and early closes.
 - For SELL: check current holdings, and handle fractional-share and minimum order rules per broker.
 - Order lifecycle (pending, executed, failed, cancelled) and a worker that actually places orders at `executionTime`.
@@ -61,12 +62,12 @@ Dollar amounts are allocated in whole cents with the largest remainder method, s
 
 ## Did you use AI tools? How did they help?
 
-> **Note to self before submitting:** this section must describe your own experience honestly. The draft below describes how this project was built; edit it so it is accurate and in your words, and make sure you can explain every part of the code in the interview.
+Yes. I used Claude Code, Anthropic's coding assistant, running in my editor. The brief allows AI tools, so here is exactly how I used it.
 
-Yes. I used Claude Code (Anthropic's CLI assistant) as a pair programmer. The brief explicitly allows AI tools, so I want to be clear about where it helped and where I made the decisions.
+- **Planning first.** Before any code, I asked it to read the brief and propose the tech stack, the structure and the approach. I reviewed that plan and approved it, then it built the project in the layers described above.
+- **Writing code and tests.** It wrote most of the first draft: the splitter, the market calendar, the routes and the test suites. The edge-case list (weekend and Friday rollover, the daylight saving change, duplicate symbols, 0 to 7 decimal places, malformed JSON) came out of that work, and I used the coverage report to find gaps. That is how the 413 and 500 tests got added.
+- **Environment problems.** Node wasn't installed on my machine, so I chose to run the build and tests inside Docker. It handled that setup and sorted out the slow start-up caused by the Windows file mount.
+- **Review feedback.** After a review of the first version, I passed the comments back to it: a flat $100 default price, `zod` upgraded after `npm audit` flagged a high-severity issue, upper and lower limits on amounts and prices, a 400 for a malformed order id, and a 415 for non-JSON bodies. Each change has tests.
+- **Where I made the calls.** I set the scope and the assumptions in this file. I decided to keep storage in memory behind an interface, and I had the first version of the response-time code simplified to a plain console log, which is all the brief asks for. I read through the code before submitting it, and I can explain how any part of it works.
 
-- **Planning:** I had it read the brief and propose a stack and layered structure, which I reviewed and approved before any code was written.
-- **Money maths:** It suggested the largest remainder method to keep cent amounts adding up to the total, and I asked for round-down for shares. I checked the results by hand, for example $100 split 60/40 at $190 and $250 gives 0.315 and 0.16 shares.
-- **Tests:** It generated a first set of edge-case tests (weekend and Friday rollover, daylight saving, duplicate symbols, 0 to 7 decimal places, malformed JSON). I ran them and used the coverage report to find gaps (the 413 and 500 paths), which led to extra tests.
-- **Tooling friction:** Node wasn't installed on my machine, so the build and tests were run inside a Docker container. It also helped debug a slow-start problem in that setup, which was bind-mount file speed, not an app bug.
-- **What I did myself:** chose the scope, reviewed every file, simplified a response-time header hack it first wrote (I only wanted the console log the brief asks for), and decided the assumptions listed above.
+Where AI helped most was speed on boilerplate and thinking up edge cases. Where it needed checking was the money maths: I verified the rounding with simple cases such as $100 split 60/40, and I wouldn't ship that part without those tests.
